@@ -31,21 +31,28 @@ namespace UI
         /// <summary>Wire to the button's OnClick.</summary>
         public void SetOriginPressed()
         {
+            Debug.Log("[Origin] Set origin pressed.");
+            Bind();
             if (_origin != null) _origin.Calibrate();
+            else Debug.LogWarning("[Origin] No OriginCalibration available.");
         }
 
-        private void OnEnable()
-        {
-            _origin = OriginCalibration.Instance != null ? OriginCalibration.Instance
-                                                          : FindAnyObjectByType<OriginCalibration>();
-            if (_origin == null) return;
-            _origin.OnStateChanged += Refresh;
-            Refresh(_origin.IsCalibrated, _origin.StatusMessage);
-        }
+        private void OnEnable() => Bind();
 
         private void OnDisable()
         {
             if (_origin != null) _origin.OnStateChanged -= Refresh;
+            _origin = null;
+        }
+
+        // Resolved lazily: the panel can initialise before OriginCalibration exists.
+        private void Bind()
+        {
+            if (_origin != null) return;
+            _origin = OriginCalibration.GetOrCreate();
+            if (_origin == null) return;
+            _origin.OnStateChanged += Refresh;
+            Refresh(_origin.IsCalibrated, _origin.StatusMessage);
         }
 
         private void Refresh(bool calibrated, string message)

@@ -73,10 +73,17 @@ namespace Interaction
         private Camera _cam;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void EnsureExists()
+        private static void EnsureExists() => GetOrCreate();
+
+        /// <summary>The scene's OriginCalibration, creating one if there isn't any yet. Callers must
+        /// use this rather than Instance: the panel and this component both initialise after scene
+        /// load in no guaranteed order.</summary>
+        public static OriginCalibration GetOrCreate()
         {
-            if (Instance != null || FindAnyObjectByType<OriginCalibration>() != null) return;
-            new GameObject("OriginCalibration").AddComponent<OriginCalibration>();
+            if (Instance != null) return Instance;
+            var existing = FindAnyObjectByType<OriginCalibration>();
+            if (existing != null) return existing;
+            return new GameObject("OriginCalibration").AddComponent<OriginCalibration>();
         }
 
         private void Awake()
@@ -121,7 +128,8 @@ namespace Interaction
         /// <summary>Button entry point: recenter (optionally) and lock the origin here.</summary>
         public void Calibrate()
         {
-            if (_busy) return;
+            if (_busy) { Debug.Log("[Origin] Already calibrating."); return; }
+            Debug.Log("[Origin] Calibrating ...");
             StartCoroutine(CalibrateRoutine());
         }
 
