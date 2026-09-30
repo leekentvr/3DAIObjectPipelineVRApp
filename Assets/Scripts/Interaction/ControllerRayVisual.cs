@@ -33,6 +33,11 @@ namespace Interaction
         [SerializeField] private float _width = 0.004f;
         [SerializeField] private Color _color = new Color(0.2f, 0.9f, 1f, 0.9f);
 
+        [Tooltip("Hide this custom ray while the pointer is over UI (tracked by " +
+                 "UiHoverTracker), so Meta's own UI ray is the only one shown over panels " +
+                 "-- avoids two rays at once. Needs a UiHoverTracker on the panel.")]
+        [SerializeField] private bool _hideOverUi = true;
+
         [Tooltip("How often (seconds) to re-query EnvironmentRaycastManager for where the " +
                  "ray hits a real surface. This was previously called every single frame, " +
                  "which was expensive enough (a real-time depth query, at full VR frame " +
@@ -72,6 +77,14 @@ namespace Interaction
         private void Update()
         {
             if (_rayOrigin == null)
+            {
+                _line.enabled = false;
+                return;
+            }
+
+            // Over UI, defer to Meta's own ray (which terminates neatly on the panel) so
+            // there aren't two rays at once.
+            if (_hideOverUi && UiHoverTracker.IsPointerOverUi)
             {
                 _line.enabled = false;
                 return;

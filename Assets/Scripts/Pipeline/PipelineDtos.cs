@@ -99,6 +99,40 @@ namespace Pipeline
         [JsonProperty("description")] public string Description; // may be null
         [JsonProperty("mesh_url")] public string MeshUrl; // relative, e.g. /project/<id>/meshes/transformedobject_0.glb
         [JsonProperty("mask_url")] public string MaskUrl;
+        // Full-res LoD source + the on-demand LoD endpoint base (append ?ratio=0-1).
+        // Null on servers/projects that predate LoD support -- callers must null-check.
+        [JsonProperty("full_mesh_url")] public string FullMeshUrl;
+        [JsonProperty("lod_url")] public string LodUrl;
+        // Owning project (per-object, since a room aggregates many projects) and the
+        // saved world placement, if any. Null when unknown/unsaved -- null-check both.
+        [JsonProperty("project")] public string Project;
+        [JsonProperty("placement")] public Placement Placement;
+    }
+
+    /// <summary>A saved world-space placement (Unity coords) for an object -- where it was
+    /// put in the real room. Round-trips with the server's placement_{i}.json.</summary>
+    [JsonObject(MemberSerialization.OptIn)]
+    public class Placement
+    {
+        [JsonProperty("position")] public float[] Position;   // x, y, z
+        [JsonProperty("rotation")] public float[] Rotation;   // x, y, z, w (quaternion)
+        [JsonProperty("scale")] public float[] Scale;         // x, y, z
+
+        public bool IsValid =>
+            Position != null && Position.Length == 3 &&
+            Rotation != null && Rotation.Length == 4 &&
+            Scale != null && Scale.Length == 3;
+    }
+
+    /// <summary>Response of GET /api/rooms/{room}/objects -- every object across all of a
+    /// room's captures.</summary>
+    [JsonObject(MemberSerialization.OptIn)]
+    public class RoomObjectsResponse
+    {
+        [JsonProperty("room")] public string Room;
+        [JsonProperty("project_count")] public int ProjectCount;
+        [JsonProperty("object_count")] public int ObjectCount;
+        [JsonProperty("objects")] public ObjectEntry[] Objects;
     }
 
     /// <summary>Response of GET /api/projects/{project}/objects.</summary>

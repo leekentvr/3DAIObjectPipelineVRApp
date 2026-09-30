@@ -34,11 +34,23 @@ namespace Pipeline
     {
         public string baseUrl = "http://192.168.1.100:5000";
 
-        // Per docs/pipeline-api.md (as of this writing) the pipeline server has NO
-        // authentication at all -- this field exists only because CLAUDE.md's Auth
-        // section describes an X-API-Token requirement. If/when the server adds auth,
-        // set this and PipelineApiClient will send it as the X-API-Token header on
-        // every request. Leave blank while the server has no auth.
+        // Candidate API tokens to try, in order. Per docs/pipeline-api.md the pipeline
+        // server currently has NO authentication, but as machines get whitelisted on the
+        // server one at a time, each headset can carry a list of possible tokens here.
+        // PipelineApiClient tries them against the server and the first one the server
+        // ACCEPTS (any response that isn't 401) gets "stuck" -- remembered in apiToken
+        // below and reused for every subsequent request. Leave empty while the server has
+        // no auth. Populate it in the Inspector via PipelineConfigPanel, or by hand in
+        // pipeline-config.json:  "apiTokens": ["tokenForHeadsetA", "tokenForHeadsetB"]
+        public string[] apiTokens = new string[0];
+
+        // The token that was found to work and is now in use. Auto-filled by
+        // PipelineApiClient the first time it finds an accepted token from apiTokens (and
+        // honored if you set it by hand). This is the "stick with the one that works"
+        // cache; it persists across restarts so there's no re-probing every launch. It's
+        // cleared automatically if the server later rejects it with a 401, so the
+        // apiTokens list gets re-checked (covers a rotated token, or this machine getting
+        // whitelisted under a different one of the candidates).
         public string apiToken = "";
 
         private const string FileName = "pipeline-config.json";
@@ -86,6 +98,19 @@ namespace Pipeline
                 if (string.IsNullOrWhiteSpace(config.baseUrl))
                 {
                     Debug.LogError($"[Pipeline] Config at {path} has no baseUrl set.");
+                }
+
+                // Normalize whitespace from hand-edited/adb-pushed json -- a trailing
+                // space in apiToken means every request 401s against a token-checking
+                // server, and it's invisible in logs.
+                config.baseUrl = config.baseUrl?.Trim();
+                config.apiToken = config.apiToken?.Trim();
+                if (config.apiTokens != null)
+                {
+                    for (int i = 0; i < config.apiTokens.Length; i++)
+                    {
+                        config.apiTokens[i] = config.apiTokens[i]?.Trim();
+                    }
                 }
 
                 return config;

@@ -34,6 +34,19 @@ namespace Interaction
         [Tooltip("Which button counts as \"select\" -- defaults to the index trigger.")]
         [SerializeField] private OVRInput.Button _selectButton = OVRInput.Button.PrimaryIndexTrigger;
 
+        [Tooltip("When the ray is over UI (tracked by UiHoverTracker), ignore the trigger " +
+                 "so clicking a panel button doesn't also start a capture+upload. Requires " +
+                 "a UiHoverTracker on the panel's background/buttons.")]
+        [SerializeField] private bool _ignorePressesOverUi = true;
+
+        [Header("Select feedback")]
+        [Tooltip("Played when a selection fires, so the press is obviously registered.")]
+        [SerializeField] private AudioSource _feedbackAudio;
+        [SerializeField] private AudioClip _selectClip;
+        [SerializeField] private bool _hapticsOnSelect = true;
+        [SerializeField, Range(0f, 1f)] private float _hapticAmplitude = 0.5f;
+        [SerializeField] private float _hapticSeconds = 0.08f;
+
         private void Reset()
         {
             _pointSelectController = FindAnyObjectByType<PointSelectController>();
@@ -48,9 +61,38 @@ namespace Interaction
 
             if (OVRInput.GetDown(_selectButton, _controller))
             {
+                // Don't turn a UI click into a world selection. Without this, pressing the
+                // trigger to click Save/Test on the config panel also fires OnPointerSelect,
+                // which POSTs a new capture to the server.
+                if (_ignorePressesOverUi && UiHoverTracker.IsPointerOverUi)
+                {
+                    return;
+                }
+
                 var ray = new Ray(_rayOrigin.position, _rayOrigin.forward);
+                PlaySelectFeedback();
                 _pointSelectController.OnPointerSelect(ray);
             }
+        }
+
+        private void PlaySelectFeedback()
+        {
+            if (_feedbackAudio != null && _selectClip != null)
+            {
+                _feedbackAudio.PlayOneShot(_selectClip);
+            }
+
+            if (_hapticsOnSelect)
+            {
+                OVRInput.SetControllerVibration(1f, _hapticAmplitude, _controller);
+                CancelInvoke(nameof(StopHaptics));
+                Invoke(nameof(StopHaptics), _hapticSeconds);
+            }
+        }
+
+        private void StopHaptics()
+        {
+            OVRInput.SetControllerVibration(0f, 0f, _controller);
         }
     }
 }

@@ -41,8 +41,26 @@ namespace Interaction
         [Header("Mesh")]
         [SerializeField] private MeshInstantiator _meshInstantiator;
 
+        [Header("Pipeline project")]
+        [Tooltip("Base project name. Editable here in the engine. A unique timestamp suffix " +
+                 "is appended per capture so every selection is its own server-side project " +
+                 "(metadata is tracked server-side). Base must be letters/digits/_/- only " +
+                 "(server validates ^[A-Za-z0-9_-]{1,100}$).")]
+        [SerializeField] private string _projectName = "ToyodaLab";
+
         [Header("Polling")]
         [SerializeField] private float _pollIntervalSeconds = 2f;
+
+        [Header("Rotation")]
+        [Tooltip("If true (default -- try this first now that the pipeline's Y-up/Z-up bake " +
+                 "fix is in, see sam-3d-objects/notebook/run_sam3d.py's transform_like_notebook), " +
+                 "trust the mesh's own baked orientation: the object is placed with identity " +
+                 "rotation (modulo MeshInstantiator._axisCorrectionEulerDegrees), letting SAM3D's " +
+                 "reconstructed pose show through untouched. If false, falls back to the old " +
+                 "yaw-to-camera heuristic below -- kept only so the two can be compared on a real " +
+                 "capture; that heuristic predates the pipeline fix and was a stopgap for when " +
+                 "the baked rotation looked wrong.")]
+        [SerializeField] private bool _trustBakedRotation = true;
 
         [Header("Debugging")]
         [Tooltip("Write every captured frame's exact color/depth PNG bytes -- the same " +
@@ -64,9 +82,38 @@ namespace Interaction
         private PipelineApiClient _client;
         private bool _busy;
 
+        /// <summary>True while a selection is being processed end to end (capture ->
+        /// upload -> reconstruction -> placement). While true, new selections are
+        /// rejected -- UI can use this to show a locked/pending state.</summary>
+        public bool IsBusy => _busy;
+
+        /// <summary>Fired when _busy changes, with the new value. Complements
+        /// OnStatusChanged for UI that wants to lock/unlock rather than parse strings.</summary>
+        public event Action<bool> OnBusyChanged;
+
+        /// <summary>Fired ~4x/second while a selection is processing, with elapsed time.
+        /// Bind a timer label to this to show the user how long it's been running (the
+        /// status string also carries mm:ss, but this updates smoothly between poll ticks).
+        /// Fires once with TimeSpan.Zero when processing ends so a bound label can reset.</summary>
+        public event Action<TimeSpan> OnProcessingTimeChanged;
+
+        // Measures how long the current selection has been processing (capture -> upload ->
+        // reconstruction -> placement). Update() pumps OnProcessingTimeChanged from it.
+        private readonly System.Diagnostics.Stopwatch _processingStopwatch = new System.Diagnostics.Stopwatch();
+        private float _lastTimerEmit;
+
         private void Awake()
         {
             _client = new PipelineApiClient();
+        }
+
+        private void Update()
+        {
+            if (!_processingStopwatch.IsRunning) return;
+            // Throttle to ~4 updates/sec: smooth enough for a mm:ss readout, no per-frame spam.
+            if (Time.unscaledTime - _lastTimerEmit < 0.25f) return;
+            _lastTimerEmit = Time.unscaledTime;
+            OnProcessingTimeChanged?.Invoke(_processingStopwatch.Elapsed);
         }
 
         /// <summary>Entry point -- call with a world-space pointing ray (controller ray,
@@ -75,11 +122,14 @@ namespace Interaction
         {
             if (_busy)
             {
-                Report("Already processing a selection -- ignoring new pointer input.");
+                Report("Pending -- still processing the previous selection. Input locked until it finishes.");
                 return;
             }
 
             _busy = true;
+            OnBusyChanged?.Invoke(true);
+            _processingStopwatch.Restart();
+            _lastTimerEmit = 0f;
             try
             {
                 await RunSelectFlow(pointerRay);
@@ -95,7 +145,10 @@ namespace Interaction
             }
             finally
             {
+                _processingStopwatch.Stop();
+                OnProcessingTimeChanged?.Invoke(TimeSpan.Zero); // let a bound timer label reset
                 _busy = false;
+                OnBusyChanged?.Invoke(false);
             }
         }
 
@@ -138,30 +191,41 @@ namespace Interaction
             var capturePose = new Pose(frame.CameraWorldPosition, frame.CameraWorldRotation);
             Vector2 viewportPoint = _cameraAccess.WorldToViewportPoint(hit.point, capturePose);
             float pixelX = viewportPoint.x * frame.Width;
-            // NOTE (verify-on-first-real-test): flip this if the selected pixel ends up
-            // vertically mirrored relative to the uploaded image -- see the same caveat
-            // in DepthFrameCapture. Viewport-space here is bottom-left origin (per
-            // PassthroughCameraAccess's own doc comment), same convention Texture2D.SetPixel
-            // uses, so SaveDebugSelectionMarker below should need no flip if this is right.
-            float pixelY = viewportPoint.y * frame.Height;
+            // Y-AXIS FLIP -- this is the fix for "the marker looks right but the server
+            // processes the wrong spot". Unity viewport space is BOTTOM-LEFT origin
+            // (y=0 at the bottom), but the server reads point[1] as a row in input.png,
+            // which is an ordinary raster image: TOP-LEFT origin (row 0 at the top). So
+            // the value we send must be measured from the top. Without this flip the point
+            // is vertically mirrored, and SAM3D segments whatever sits the same distance
+            // from the OPPOSITE edge of the frame. The debug marker hid this because it was
+            // ALSO drawn in bottom-left space, so it happened to land on the object while
+            // the number sent to the server did not.
+            float pixelY = (1f - viewportPoint.y) * frame.Height;
 
             if (_saveDebugCapturesToDisk)
             {
+                // Pass the exact top-left-origin pixel we're about to send. The marker
+                // helper flips it back into Texture2D's bottom-left space so the crosshair
+                // now verifies the REAL coordinate the server will use, not a lookalike.
                 SaveDebugSelectionMarker(frame, pixelX, pixelY);
             }
 
             Report("Uploading capture...");
-            string projectName = $"vr_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
+            string baseName = string.IsNullOrWhiteSpace(_projectName) ? "ToyodaLab" : _projectName.Trim();
+            // Unique per capture -> a fresh server-side project every time, so no stale
+            // meshes and no cross-run URL collisions. fff (ms) keeps rapid captures distinct.
+            string projectName = $"{baseName}_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}";
             string projectId = await _client.CreateProjectAsync(frame.ColorPng, frame.DepthPng16, projectName);
 
             CameraIntrinsics? intrinsics = hasDepth ? frame.Intrinsics : (CameraIntrinsics?)null;
 
             Report("Requesting reconstruction...");
             string jobId = await _client.SelectAsync(projectId, pixelX, pixelY, intrinsics: intrinsics);
+            Report($"Pending -- image sent for processing (job {jobId}). Waiting for the server...");
 
             JobStatusResponse final = await _client.PollJobUntilDoneAsync(
                 jobId,
-                status => Report($"Processing ({status.Stage ?? status.Status})..."),
+                status => Report($"Processing ({status.Stage ?? status.Status})... {FormatElapsed(_processingStopwatch.Elapsed)}"),
                 _pollIntervalSeconds);
 
             if (final.IsError)
@@ -178,28 +242,66 @@ namespace Interaction
                 return;
             }
 
-            ObjectEntry obj = objects.Objects[0]; // /select always reconstructs exactly one object
+            // Log the FULL manifest every run -- this is how we tell "wrong object" apart
+            // from "unexpected extra object". Each capture is now its own fresh project, and
+            // the /select flow reconstructs exactly one object at index 0, so a healthy
+            // manifest here has a single entry. More than one means the server produced extra
+            // objects for this project -- worth a look, but index 0 is still this selection.
+            Debug.Log($"[PointSelect] Objects manifest for '{projectId}': count={objects.Objects.Length}");
+            foreach (ObjectEntry e in objects.Objects)
+            {
+                Debug.Log($"[PointSelect]   index={e.Index} desc=\"{e.Description}\" mesh={e.MeshUrl} mask={e.MaskUrl}");
+            }
+            if (objects.Objects.Length > 1)
+            {
+                Report($"Note: {objects.Objects.Length} objects returned for this capture (expected 1). " +
+                       "Using index 0. Check the manifest log if it's not what you selected.");
+            }
+
+            // Deterministically take index 0 (the select-flow object), not just array slot 0.
+            ObjectEntry obj = System.Array.Find(objects.Objects, e => e.Index == 0) ?? objects.Objects[0];
+
+            if (_saveDebugCapturesToDisk)
+            {
+                await SaveDebugMask(obj); // pull the mask the server actually segmented, to compare vs where you clicked
+            }
+
             Report("Downloading mesh...");
             byte[] glb = await _client.DownloadBytesAsync(obj.MeshUrl);
 
-            GameObject placed;
             string label = obj.Description ?? "ReconstructedObject";
-            if (hasDepth)
+
+            // Raycast-anchored placement: put the object where the pointing ray actually
+            // hit the real, Unity-tracked environment (EnvironmentRaycast uses the headset's
+            // own scene depth). This deliberately does NOT trust the server's baked
+            // camera-relative transform for POSITION -- that's in SAM3D's camera convention
+            // and depends on depth units/intrinsics we haven't reconciled yet. Anchoring on
+            // Unity's own tracking gives a solid position regardless. Scale is still tunable
+            // via MeshInstantiator._uniformScaleMultiplier until the metric path is fixed.
+            // Depth is still uploaded above -- it improves the reconstruction itself, it just
+            // no longer drives placement.
+            //
+            // ROTATION: previously this always yawed the object to face the capture camera,
+            // discarding SAM3D's baked orientation entirely -- a stopgap from when rotation
+            // "looked wrong" for reasons later traced to a Y-up/Z-up bug on the pipeline side
+            // (see sam-3d-objects/notebook/run_sam3d.py's transform_like_notebook, which now
+            // does the correct round-trip conversion). With that fixed upstream, the baked
+            // rotation may be trustworthy now -- _trustBakedRotation toggles between the two
+            // so you can compare them on a real capture.
+            Quaternion facing;
+            if (_trustBakedRotation)
             {
-                // Metric, camera-relative pose is baked into the mesh -- instantiate at
-                // the CAPTURED camera's world transform (this frame's, not wherever the
-                // headset is NOW) per docs/pipeline-api.md "Object placement for Unity".
-                placed = await _meshInstantiator.LoadAndPlaceAsync(
-                    glb, frame.CameraWorldPosition, frame.CameraWorldRotation, label);
+                facing = Quaternion.identity;
             }
             else
             {
-                // No depth -> shape-only mesh, not metrically grounded (see API doc).
-                // Rough fallback: drop it at the raycast hit point, facing the capture
-                // camera. This is explicitly a placeholder, not a real placement solution.
-                Quaternion facing = Quaternion.LookRotation(hit.point - frame.CameraWorldPosition, Vector3.up);
-                placed = await _meshInstantiator.LoadAndPlaceAsync(glb, hit.point, facing, label);
+                Vector3 toCamera = frame.CameraWorldPosition - hit.point;
+                toCamera.y = 0f;
+                facing = toCamera.sqrMagnitude > 1e-4f
+                    ? Quaternion.LookRotation(toCamera, Vector3.up)
+                    : Quaternion.identity;
             }
+            GameObject placed = await _meshInstantiator.LoadAndAnchorAsync(glb, hit.point, facing, label);
 
             if (placed == null)
             {
@@ -207,7 +309,25 @@ namespace Interaction
                 return;
             }
 
-            Report("Done.");
+            // Tag the placed object with its server identity so its level of detail can be
+            // re-requested and swapped in place later (see PlacedObjectLod / LodTuner). The
+            // first-placed mesh is the server's default decimation, so CurrentRatio starts
+            // unknown (-1). Only meaningful if the server exposes the LoD endpoint (lod_url).
+            if (!string.IsNullOrEmpty(obj.LodUrl) || !string.IsNullOrEmpty(obj.FullMeshUrl))
+            {
+                var lod = placed.GetComponent<PlacedObjectLod>();
+                if (lod == null) lod = placed.AddComponent<PlacedObjectLod>();
+                lod.Configure(_client, _meshInstantiator, projectId, obj.Index, label,
+                              grabbable: true, currentRatio: -1f);
+            }
+
+            // Persist where this object was placed (and re-save when hand-adjusted) so the
+            // whole room can be reloaded later with everything back in place -- see RoomLoader.
+            var placement = placed.GetComponent<PlacementSync>();
+            if (placement == null) placement = placed.AddComponent<PlacementSync>();
+            placement.Configure(_client, projectId, obj.Index);
+
+            Report($"Done in {FormatElapsed(_processingStopwatch.Elapsed)}.");
             OnObjectPlaced?.Invoke(placed);
         }
 
@@ -261,7 +381,7 @@ namespace Interaction
         /// pointed at, or somewhere else entirely (wrong camera pose, flipped axis, wrong
         /// camera selected, etc. would all show up here as a visibly wrong marker
         /// position).</summary>
-        private void SaveDebugSelectionMarker(CapturedFrame frame, float pixelX, float pixelY)
+        private void SaveDebugSelectionMarker(CapturedFrame frame, float pixelX, float pixelYTopLeft)
         {
             Texture2D tex = null;
             try
@@ -273,7 +393,13 @@ namespace Interaction
                     return;
                 }
 
-                DrawCrosshair(tex, Mathf.RoundToInt(pixelX), Mathf.RoundToInt(pixelY), 14, Color.red);
+                // pixelYTopLeft is in the server's top-left-origin convention (exactly the
+                // value sent in the /select request). Texture2D pixel coords are bottom-left
+                // origin, so flip Y back before drawing -- this way the crosshair in the
+                // saved PNG lands where the server will actually look.
+                int drawX = Mathf.RoundToInt(pixelX);
+                int drawY = Mathf.RoundToInt(frame.Height - pixelYTopLeft);
+                DrawCrosshair(tex, drawX, drawY, 14, Color.red);
 
                 string dir = Path.Combine(Application.persistentDataPath, "debug-captures");
                 Directory.CreateDirectory(dir);
@@ -281,8 +407,8 @@ namespace Interaction
                 string path = Path.Combine(dir, $"{stamp}_selection_marker.png");
                 File.WriteAllBytes(path, tex.EncodeToPNG());
 
-                Debug.Log($"[PointSelect] Selection pixel ({pixelX:F0}, {pixelY:F0}) of " +
-                          $"{frame.Width}x{frame.Height} -- marker saved to {path}. Pull it " +
+                Debug.Log($"[PointSelect] Selection pixel (top-left origin) ({pixelX:F0}, {pixelYTopLeft:F0}) " +
+                          $"of {frame.Width}x{frame.Height} -- marker saved to {path}. Pull it " +
                           "and check the red crosshair actually lands on what you pointed at.");
             }
             catch (Exception e)
@@ -292,6 +418,32 @@ namespace Interaction
             finally
             {
                 if (tex != null) Destroy(tex);
+            }
+        }
+
+        /// <summary>Downloads the mask the server actually segmented for this object and
+        /// saves it next to the capture/marker, so you can directly compare "what I clicked"
+        /// (the red crosshair) against "what the server selected" (the white mask). If they
+        /// disagree, the selection pixel or SAM3's exemplar matching is the culprit, not the
+        /// mesh. Never lets a debug convenience break the real flow.</summary>
+        private async Task SaveDebugMask(ObjectEntry obj)
+        {
+            if (string.IsNullOrEmpty(obj.MaskUrl)) return;
+            try
+            {
+                byte[] maskBytes = await _client.DownloadBytesAsync(obj.MaskUrl);
+                string dir = Path.Combine(Application.persistentDataPath, "debug-captures");
+                Directory.CreateDirectory(dir);
+                string stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fff");
+                string path = Path.Combine(dir, $"{stamp}_mask_idx{obj.Index}.png");
+                File.WriteAllBytes(path, maskBytes);
+                Debug.Log($"[PointSelect] Saved server mask (index {obj.Index}) to {path}. " +
+                          "Compare it against the same run's _selection_marker.png -- the white " +
+                          "region is what the server segmented; the red crosshair is where you pointed.");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[PointSelect] Failed to save debug mask: {e.Message}");
             }
         }
 
@@ -311,6 +463,14 @@ namespace Interaction
         {
             if (x < 0 || y < 0 || x >= tex.width || y >= tex.height) return;
             tex.SetPixel(x, y, color);
+        }
+
+        /// <summary>mm:ss (or h:mm:ss past an hour) for status text.</summary>
+        private static string FormatElapsed(TimeSpan t)
+        {
+            return t.TotalHours >= 1
+                ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
+                : $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
         }
 
         private void Report(string message)

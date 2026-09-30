@@ -29,26 +29,29 @@ namespace UI
     /// SECURITY, for this "one server + 1-2 known headsets, same private LAN" setup:
     /// the live pipeline server currently has NO authentication at all (see
     /// docs/pipeline-api.md "Security") -- anything on the network can call it. This
-    /// panel still applies _staticApiToken (an Inspector-only value, never typed in
-    /// VR) as an X-API-Token header on every request via PipelineApiClient. That header
-    /// being sent accomplishes NOTHING by itself -- it's inert until the
+    /// panel still applies _staticApiTokens (an Inspector-only LIST of candidate tokens,
+    /// never typed in VR): PipelineApiClient tries them against the server and sends
+    /// whichever one the server accepts as an X-API-Token header on every request. That
+    /// header being sent accomplishes NOTHING by itself -- it's inert until the
     /// pipeline-controller server (a separate repo; out of scope here per CLAUDE.md's
-    /// "Non-goals") is changed to actually check it. A minimal server-side check
-    /// (Flask, sketch -- adapt to that repo's actual structure):
+    /// "Non-goals") is changed to actually check it. A minimal server-side check that
+    /// accepts a whitelist of tokens (Flask, sketch -- adapt to that repo's structure):
     ///
-    ///   EXPECTED_TOKEN = os.environ["PIPELINE_API_TOKEN"]  # don't hardcode/commit it
+    ///   # comma-separated whitelist; add a machine's token here to let it in
+    ///   ALLOWED = set(os.environ["PIPELINE_API_TOKENS"].split(","))  # don't commit it
     ///
     ///   @app.before_request
     ///   def check_token():
     ///       if request.path.startswith("/api/") and \
-    ///          request.headers.get("X-API-Token") != EXPECTED_TOKEN:
+    ///          request.headers.get("X-API-Token") not in ALLOWED:
     ///           abort(401)
     ///
     /// That's proportionate for this threat model (trusted private LAN, not internet-
     /// facing) -- it stops other devices on the same network from casually hitting the
     /// API, not a determined attacker who can sniff LAN traffic (the token still
-    /// travels in plaintext over plain HTTP). Set the same value in this component's
-    /// _staticApiToken field in the Editor before building.
+    /// travels in plaintext over plain HTTP). Put every headset's token in this
+    /// component's _staticApiTokens list in the Editor before building, and whitelist
+    /// each machine's token on the server as you roll them out.
     ///
     /// This script only handles the logic (load current values, validate, save, test
     /// connectivity) -- it does not build the UI for you. Getting a canvas that's
@@ -64,12 +67,14 @@ namespace UI
         [Header("Feedback")]
         [SerializeField] private TMP_Text _statusText;
 
-        [Header("API token -- static, NOT typed in VR (see class doc re: security)")]
-        [Tooltip("Set once here in the Editor to match the server's expected token, if " +
-                 "you've added token-checking there. Applied automatically on every " +
-                 "Save; left as-is on disk if blank. Does nothing until the server " +
-                 "actually validates it.")]
-        [SerializeField] private string _staticApiToken = "";
+        [Header("API tokens -- static list, NOT typed in VR (see class doc re: security)")]
+        [Tooltip("Candidate tokens, e.g. one per machine/headset. PipelineApiClient tries " +
+                 "them against the server and sticks with the first the server accepts. " +
+                 "Set here in the Editor to match the server's expected token(s), if " +
+                 "you've added token-checking there. Applied automatically on every Save; " +
+                 "the list on disk is left as-is if this is empty. Does nothing until the " +
+                 "server actually validates the X-API-Token header.")]
+        [SerializeField] private string[] _staticApiTokens = new string[0];
 
         private const string DefaultHost = "192.168.1.100";
         private const string DefaultPort = "5000";
@@ -115,9 +120,24 @@ namespace UI
 
             PipelineConfig config = PipelineConfig.Instance;
             config.baseUrl = url;
-            if (!string.IsNullOrEmpty(_staticApiToken))
+            // Trim each token -- a value pasted into the Inspector with a stray leading/
+            // trailing space otherwise gets persisted verbatim and 401s against the server.
+            // De-dupe and drop blanks so the candidate list stays clean.
+            var tokens = new System.Collections.Generic.List<string>();
+            if (_staticApiTokens != null)
             {
-                config.apiToken = _staticApiToken;
+                foreach (string raw in _staticApiTokens)
+                {
+                    string t = raw?.Trim();
+                    if (!string.IsNullOrEmpty(t) && !tokens.Contains(t)) tokens.Add(t);
+                }
+            }
+            if (tokens.Count > 0)
+            {
+                config.apiTokens = tokens.ToArray();
+                // New/changed candidate list -> forget any previously stuck token so the
+                // client re-checks against this list on the next request.
+                config.apiToken = "";
             }
             config.SaveToDisk();
 

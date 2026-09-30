@@ -63,3 +63,13 @@ crashlytics-build.properties
 # in the working tree during on-device debugging (e.g. via adb pull).
 pipeline-config.json
 pipeline-config.local.json
+
+unity_log.txt
+*.docx
+Assets/Scripts/Testing/scene.glb
+Assets/Scripts/Testing/scene.glb.meta
+
+unity_log.txt
+*.docx
+Assets/Scripts/Testing/scene.glb
+Assets/Scripts/Testing/scene.glb.meta

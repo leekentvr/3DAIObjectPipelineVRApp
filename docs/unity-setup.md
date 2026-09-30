@@ -108,15 +108,18 @@ Console. The very first time, before the in-VR panel below exists in a build on 
 headset, you have to seed/edit this file the slow way (adb pull/edit/push -- see the
 comments in `PipelineConfig.cs` for exact commands). After that, use the panel.
 
-Leave `apiToken` blank -- the live server has no authentication (see
+Leave `apiTokens` empty -- the live server has no authentication (see
 `docs/pipeline-api.md` "Security"); the field exists only in case that changes later.
+When the server does start checking tokens, `apiTokens` is a *list* of candidate tokens
+(one per machine/headset); the client tries each, sticks with the first the server
+accepts, and caches it in `apiToken`. Don't hand-edit `apiToken` -- it's auto-filled.
 
 ### Setting the server address from inside the app (recommended -- the address changes often)
 
 `Assets/Scripts/UI/PipelineConfigPanel.cs` lets you type the server's LAN address
 in-headset and save it, no PC/adb round-trip required. It reads/writes the same
 `PipelineConfig.Instance` that `PipelineApiClient` uses, and `PipelineApiClient` now
-reads `baseUrl`/`apiToken` live on every request (not a copy taken at construction) --
+reads `baseUrl`/token live on every request (not a copy taken at construction) --
 so saving here takes effect immediately, even for a `PipelineApiClient` some other
 component already created earlier in the session.
 
@@ -166,19 +169,23 @@ the Interaction SDK path below; don't mix the two on the same Canvas, they confl
    keyboard isn't worth building for even though address typing now works fine. The
    port is fixed at `PipelineConfigPanel.DefaultPort` (`5000`, per
    `docs/pipeline-api.md`) since this is one known server; change that constant and
-   rebuild if it's ever different. `PipelineConfigPanel` has a `_staticApiToken`
-   Inspector field instead of a typed-in token: set it once in the Editor (you're only
-   targeting 1-2 known headsets), and it's applied automatically on every Save.
+   rebuild if it's ever different. `PipelineConfigPanel` has a `_staticApiTokens`
+   Inspector list instead of typed-in tokens: fill it in the Editor (one entry per
+   headset), and it's applied automatically on every Save. The client tries each and
+   sticks with whichever the server accepts, so you can roll machines out one at a time.
 
-   **Security, for "one server + 1-2 known headsets on a trusted LAN":** the live
+   **Security, for "one server + a few known headsets on a trusted LAN":** the live
    server has no authentication at all (see `docs/pipeline-api.md` "Security") -- so
-   leaving `_staticApiToken` blank is fine functionally, since the header does nothing
+   leaving `_staticApiTokens` empty is fine functionally, since the header does nothing
    server-side yet. If you want it to do something, add a matching check to the
    separate `pipeline-controller` repo (out of scope here per CLAUDE.md's
    "Non-goals") -- see the Flask sketch in `PipelineConfigPanel.cs`'s class doc
-   comment -- and set the same value in `_staticApiToken`. Even then, this only stops
-   other devices on the LAN from casually hitting the API; it's plaintext HTTP, so it
-   doesn't defend against someone actually sniffing traffic on that network.
+   comment, which validates the `X-API-Token` header against a whitelist of tokens.
+   Give each headset its own token in `_staticApiTokens`, and add that token to the
+   server's whitelist when you're ready to let that machine in -- the headset starts
+   working on its next request, no rebuild. Even then, this only stops other devices on
+   the LAN from casually hitting the API; it's plaintext HTTP, so it doesn't defend
+   against someone actually sniffing traffic on that network.
 8. Add `PipelineConfigPanel` to the Canvas (or any child), assign the host input
    field (`_hostInput`) and the status text.
 9. Button wiring (Inspector → Button → On Click ()):
