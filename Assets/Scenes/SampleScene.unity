@@ -5839,6 +5839,7 @@ MonoBehaviour:
   _projectName: ToyodaLab
   _pollIntervalSeconds: 2
   _trustBakedRotation: 1
+  _maxPlacedObjects: 12
   _saveDebugCapturesToDisk: 1
 --- !u!114 &866160259
 MonoBehaviour:
@@ -5916,7 +5917,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dd1de96e08521bb4c9a0b996bd2626b9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _room: ToyodaLab
+  _room: ToyodaLab2
   _meshInstantiator: {fileID: 866160259}
   _lodRatio: 0.5
   _makeGrabbable: 1
@@ -9005,7 +9006,7 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 0}
+      - m_Target: {fileID: 866160263}
         m_TargetAssemblyTypeName: Interaction.LodTuner, Assembly-CSharp
         m_MethodName: Finer
         m_Mode: 1
@@ -10279,7 +10280,7 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 0}
+      - m_Target: {fileID: 866160263}
         m_TargetAssemblyTypeName: Interaction.LodTuner, Assembly-CSharp
         m_MethodName: Coarser
         m_Mode: 1
