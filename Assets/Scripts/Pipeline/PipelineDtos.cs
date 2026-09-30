@@ -118,6 +118,11 @@ namespace Pipeline
         [JsonProperty("rotation")] public float[] Rotation;   // x, y, z, w (quaternion)
         [JsonProperty("scale")] public float[] Scale;         // x, y, z
 
+        // Optional. When Frame == "mruk_room", Position/Rotation are LOCAL to the MRUK room
+        // with RoomUuid (survives tracking-origin resets); otherwise they are raw world space.
+        [JsonProperty("frame", NullValueHandling = NullValueHandling.Ignore)] public string Frame;
+        [JsonProperty("room_uuid", NullValueHandling = NullValueHandling.Ignore)] public string RoomUuid;
+
         public bool IsValid =>
             Position != null && Position.Length == 3 &&
             Rotation != null && Rotation.Length == 4 &&

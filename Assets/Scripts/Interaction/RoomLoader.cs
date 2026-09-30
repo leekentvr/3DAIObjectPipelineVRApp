@@ -19,8 +19,10 @@ namespace Interaction
     /// Wiring: put this on any GameObject, set _room (or leave it to match your capture base
     /// name), assign _meshInstantiator, and bind a VR button's OnClick to LoadRoom().
     ///
-    /// Cross-session caveat: saved placements live in the headset's tracking space; without a
-    /// shared spatial anchor they won't align to the real room after a Guardian/space reset.
+    /// Placements are saved relative to the MRUK room (see RoomFrame), so they realign after a
+    /// Guardian/space reset provided the same room is loaded. Older placements saved in raw
+    /// tracking space still load, but only line up if the origin hasn't moved.
+    /// MRUK must have loaded the scene before LoadRoom() is called.
     /// </summary>
     public class RoomLoader : MonoBehaviour
     {
@@ -145,6 +147,15 @@ namespace Interaction
                 rot = new Quaternion(p.Rotation[0], p.Rotation[1], p.Rotation[2], p.Rotation[3]);
                 scale = new Vector3(p.Scale[0], p.Scale[1], p.Scale[2]);
                 usedFallback = false;
+
+                if (p.Frame == RoomFrame.FrameId)
+                {
+                    if (RoomFrame.TryGetCurrent(out Transform frame, out string uuid) && uuid == p.RoomUuid)
+                        RoomFrame.ToWorld(frame, pos, rot, out pos, out rot);
+                    else
+                        Debug.LogWarning($"[Room] {obj.Project}#{obj.Index} was saved in MRUK room " +
+                                         $"{p.RoomUuid}, which isn't the current room -- placed at its raw pose.");
+                }
                 return;
             }
 

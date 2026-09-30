@@ -380,7 +380,7 @@ namespace Pipeline
         /// restore it. Fire-and-forget friendly: throws on transport/HTTP error only.</summary>
         public async Task SavePlacementAsync(
             string project, int index, Vector3 position, Quaternion rotation, Vector3 scale,
-            CancellationToken ct = default)
+            string frame = null, string roomUuid = null, CancellationToken ct = default)
         {
             await EnsureTokenResolvedAsync(ct);
 
@@ -389,6 +389,8 @@ namespace Pipeline
                 Position = new[] { position.x, position.y, position.z },
                 Rotation = new[] { rotation.x, rotation.y, rotation.z, rotation.w },
                 Scale = new[] { scale.x, scale.y, scale.z },
+                Frame = frame,
+                RoomUuid = roomUuid,
             };
             byte[] bodyRaw = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(payload));
 
