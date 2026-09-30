@@ -190,6 +190,7 @@ namespace Pipeline
             {
                 Debug.LogError("[Mesh] glTFast failed to parse/load the downloaded .glb. glTFast said:");
                 logger.LogAll();
+                gltf.Dispose();
                 return null;
             }
 
@@ -200,11 +201,29 @@ namespace Pipeline
                 Debug.LogError("[Mesh] glTFast failed to instantiate the glTF scene. glTFast said:");
                 logger.LogAll();
                 Object.Destroy(root);
+                gltf.Dispose();
                 return null;
             }
 
+            // glTFast owns the meshes/textures it created; without Dispose they leak every time
+            // an object is destroyed (room reloads, LoD swaps, the placed-object cap) and
+            // eventually exhaust headset memory.
+            root.AddComponent<GltfImportHolder>().Import = gltf;
+
             logger.LogAll();
             return root;
+        }
+
+        /// <summary>Disposes the GltfImport that created an object when that object is destroyed.</summary>
+        private sealed class GltfImportHolder : MonoBehaviour
+        {
+            public GltfImport Import;
+
+            private void OnDestroy()
+            {
+                Import?.Dispose();
+                Import = null;
+            }
         }
 
         /// <summary>Combined world-space bounds of all renderers under root.</summary>

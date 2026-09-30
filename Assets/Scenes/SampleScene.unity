@@ -5939,11 +5939,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _pointSelectController: {fileID: 866160258}
   _ratioLadder:
-  - 1
-  - 0.75
-  - 0.5
-  - 0.25
+  - 0.02
+  - 0.05
   - 0.1
+  - 0.25
+  - 0.5
+  - 0.75
+  - 1
   _startIndex: 1
   _statusLabel: {fileID: 1720093065}
 --- !u!1 &882999639
@@ -13572,7 +13574,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _position: {x: 0, y: 0, z: 0}
-  _size: {x: 202.6838, y: 285.2589, z: 0.01}
+  _size: {x: 480, y: 600, z: 0.01}
 --- !u!114 &1961069464
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14387,7 +14389,7 @@ RectTransform:
   m_GameObject: {fileID: 2079463595}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 1.15}
-  m_LocalScale: {x: 0.0015, y: 0.0015, z: 0.001}
+  m_LocalScale: {x: 0.0008, y: 0.0008, z: 0.0008}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1184831496}
@@ -14405,7 +14407,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
   m_AnchoredPosition: {x: 0, y: 1.342}
-  m_SizeDelta: {x: 202.6838, y: 285.2589}
+  m_SizeDelta: {x: 480, y: 600}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &2079463600
 MonoBehaviour:

@@ -23,7 +23,10 @@ namespace Interaction
         private int _index;
         private GrabbableReconstruction _grab;
 
-        public void Configure(PipelineApiClient client, string project, int index)
+        /// <param name="saveNow">Save the current pose immediately. Pass false when restoring an
+        /// already-saved placement (room load / LoD swap) so it isn't overwritten with a pose
+        /// that may have been resolved differently.</param>
+        public void Configure(PipelineApiClient client, string project, int index, bool saveNow = true)
         {
             _client = client;
             _project = project;
@@ -32,7 +35,7 @@ namespace Interaction
             _grab = GetComponent<GrabbableReconstruction>();
             if (_grab != null) _grab.OnComparisonRecorded += HandleAdjusted;
 
-            Save(); // initial placement
+            if (saveNow) Save(); // initial placement
         }
 
         private void OnDestroy()

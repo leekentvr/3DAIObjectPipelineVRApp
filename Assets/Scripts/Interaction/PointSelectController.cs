@@ -77,6 +77,13 @@ namespace Interaction
                  "steps, so a capture can be verified even if a later step fails.")]
         [SerializeField] private bool _saveDebugCapturesToDisk = true;
 
+        /// <summary>Base project/room name used to name new captures (see _projectName).</summary>
+        public string ProjectName
+        {
+            get => _projectName;
+            set => _projectName = value;
+        }
+
         /// <summary>Fired with a short human-readable status string at each step -- hook
         /// this up to a "processing" UI element. Not a substitute for real progress UX,
         /// just enough to see the flow isn't stuck.</summary>
@@ -352,6 +359,7 @@ namespace Interaction
                 GameObject oldest = _placedObjects.Dequeue();
                 if (oldest != null) Destroy(oldest);
             }
+            Resources.UnloadUnusedAssets();
         }
 
         /// <summary>Writes the exact bytes about to be uploaded to

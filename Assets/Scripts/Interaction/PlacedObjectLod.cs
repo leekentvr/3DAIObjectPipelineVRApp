@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Pipeline;
@@ -31,6 +32,22 @@ namespace Interaction
         public float CurrentRatio { get; private set; } = -1f;
 
         public bool IsBusy => _busy;
+
+        /// <summary>True for objects created by RoomLoader (so a reload can clear just those).
+        /// Carried across LoD swaps.</summary>
+        public bool IsRoomLoaded { get; set; }
+
+        private static readonly List<PlacedObjectLod> s_all = new List<PlacedObjectLod>();
+
+        /// <summary>Every live LoD-tunable object in the scene.</summary>
+        public static IReadOnlyList<PlacedObjectLod> All => s_all;
+
+        private void OnEnable()
+        {
+            if (!s_all.Contains(this)) s_all.Add(this);
+        }
+
+        private void OnDisable() => s_all.Remove(this);
 
         /// <summary>Fired after a successful swap with the new root and the ratio shown.</summary>
         public event Action<GameObject, float> OnLodChanged;
@@ -93,6 +110,11 @@ namespace Interaction
                 var next = newRoot.GetComponent<PlacedObjectLod>();
                 if (next == null) next = newRoot.AddComponent<PlacedObjectLod>();
                 next.Configure(_client, _meshInstantiator, _projectId, _index, _label, _grabbable, ratio);
+                next.IsRoomLoaded = IsRoomLoaded;
+
+                // Keep persisting hand adjustments after a swap (without re-saving right now).
+                if (GetComponent<PlacementSync>() != null && newRoot.GetComponent<PlacementSync>() == null)
+                    newRoot.AddComponent<PlacementSync>().Configure(_client, _projectId, _index, saveNow: false);
 
                 OnLodChanged?.Invoke(newRoot, ratio);
                 Debug.Log($"[LoD] Object {_index} now showing ratio {ratio:0.###}.");
