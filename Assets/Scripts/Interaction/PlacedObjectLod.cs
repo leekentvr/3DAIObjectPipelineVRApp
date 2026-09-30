@@ -107,6 +107,7 @@ namespace Interaction
                 }
 
                 // Carry the LoD identity onto the new root so it can be tuned again.
+                PlacedObjectsRoot.Adopt(newRoot.transform);
                 var next = newRoot.GetComponent<PlacedObjectLod>();
                 if (next == null) next = newRoot.AddComponent<PlacedObjectLod>();
                 next.Configure(_client, _meshInstantiator, _projectId, _index, _label, _grabbable, ratio);

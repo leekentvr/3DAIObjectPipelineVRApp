@@ -45,7 +45,16 @@ namespace UI
             Canvas canvas = panel.GetComponentInParent<Canvas>(true);
             if (canvas == null) return;
             var root = canvas.transform as RectTransform;
-            if (root == null || root.Find("ControlPanelBackground") != null) return; // already styled
+            if (root == null) return;
+
+            // Safety net even for an already-baked scene: every control must carry a UiHoverTracker so
+            // clicking the panel never also fires a capture (see EnsureHoverTracker).
+            foreach (Selectable sel in root.GetComponentsInChildren<Selectable>(true))
+                EnsureHoverTracker(sel.gameObject);
+            Transform existingBorder = root.Find("ControlPanelBorder");
+            if (existingBorder != null) EnsureHoverTracker(existingBorder.gameObject);
+
+            if (root.Find("ControlPanelBackground") != null) return; // already styled
 
             try
             {
@@ -197,6 +206,18 @@ namespace UI
                              W, root.sizeDelta.y, 78f);
             AddClick(minimiseBtn, window.ToggleMinimised);
             AddClick(recenterBtn, window.Recenter);
+
+            // ControllerSelectTrigger ignores trigger presses while the ray is over a tracked UI
+            // element (UiHoverTracker). Every control -- including the ones created here -- and
+            // the card itself must carry one, or clicking the panel also starts a capture.
+            foreach (Selectable sel in root.GetComponentsInChildren<Selectable>(true))
+                EnsureHoverTracker(sel.gameObject);
+            EnsureHoverTracker(border.gameObject);
+        }
+
+        private static void EnsureHoverTracker(GameObject go)
+        {
+            if (go.GetComponent<UiHoverTracker>() == null) go.AddComponent<UiHoverTracker>();
         }
 
         /// <summary>Button click hookup. In the editor (outside Play mode) it adds a PERSISTENT listener so

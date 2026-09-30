@@ -342,6 +342,7 @@ namespace Interaction
             if (placement == null) placement = placed.AddComponent<PlacementSync>();
             placement.Configure(_client, projectId, obj.Index);
 
+            PlacedObjectsRoot.Adopt(placed.transform);
             TrackAndTrim(placed);
 
             Report($"Done in {FormatElapsed(_processingStopwatch.Elapsed)}.");

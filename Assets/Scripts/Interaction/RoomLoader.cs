@@ -150,6 +150,17 @@ namespace Interaction
                 objects = tail;
             }
 
+            // Placements saved relative to the MRUK room can only be restored once the headset has
+            // loaded that room scan; give it a few seconds instead of dropping objects at raw poses.
+            if (AnyRoomRelative(objects) && !RoomFrame.TryGetCurrent(out _, out _))
+            {
+                Report("Waiting for the room scan ...");
+                for (float t = 0f; t < 12f && !RoomFrame.TryGetCurrent(out _, out _); t += 0.25f)
+                    await Task.Delay(250);
+                if (!RoomFrame.TryGetCurrent(out _, out _))
+                    Report("Room scan not found -- placing at raw positions (may be misaligned).");
+            }
+
             float ratio = StartLodRatio;
             Debug.Log($"[Room] Loading {objects.Length} of {resp.Objects.Length} object(s) from " +
                       $"{resp.ProjectCount} capture(s) in '{room}' at LoD {ratio:0.###} ...");
@@ -175,6 +186,7 @@ namespace Interaction
                         glb, pos, rot, scale, label, _makeGrabbable);
                     if (go != null)
                     {
+                        PlacedObjectsRoot.Adopt(go.transform);
                         // Makes the object LoD-tunable and lets a later reload clear it.
                         var lod = go.AddComponent<PlacedObjectLod>();
                         lod.Configure(Client, _meshInstantiator, obj.Project, obj.Index, label,
@@ -202,6 +214,13 @@ namespace Interaction
             Debug.Log($"[Room] {summary}; {fallbackCount} without saved placement used the fallback grid.");
             OnRoomLoaded?.Invoke(placed);
             return placed;
+        }
+
+        private static bool AnyRoomRelative(ObjectEntry[] objects)
+        {
+            foreach (ObjectEntry o in objects)
+                if (o.Placement != null && o.Placement.Frame == RoomFrame.FrameId) return true;
+            return false;
         }
 
         /// <summary>Destroys every object a room load created (including LoD-swapped ones).</summary>

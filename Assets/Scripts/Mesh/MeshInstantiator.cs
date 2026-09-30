@@ -323,8 +323,12 @@ namespace Pipeline
 
         public UnityEngine.Material GetDefaultMaterial(bool pointsSupport = false) => _material;
 
+        // glTFast tracks the materials it is handed here and DESTROYS them in GltfImport.Dispose
+        // (called when a placed object is destroyed). Returning the shared material would delete it
+        // for every other object -- the mesh would render without its material after any LoD swap
+        // or room reload. Hand out an instance per request instead.
         public UnityEngine.Material GenerateMaterial(
             GLTFast.Schema.MaterialBase gltfMaterial, IGltfReadable gltf, bool pointsSupport = false)
-            => _material;
+            => new UnityEngine.Material(_material);
     }
 }
