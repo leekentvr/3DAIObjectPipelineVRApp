@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using Meta.XR.MRUtilityKit;
 using UnityEngine;
 
 namespace Interaction
@@ -27,6 +28,11 @@ namespace Interaction
         [Tooltip("Recenter the headset when setting the origin, so the tracking origin is reset " +
                  "at the calibration point too.")]
         [SerializeField] private bool _recenterHeadset = true;
+
+        [Tooltip("MRUK's world lock rewrites the tracking space every frame to keep the room scan " +
+                 "fixed. That fights the manual origin (and recentering) and can slowly shift " +
+                 "everything relative to you, so it is switched off while this component runs.")]
+        [SerializeField] private bool _disableMrukWorldLock = true;
 
         [Tooltip("Material for the marker lines. Leave empty to use Sprites/Default.")]
         [SerializeField] private Material _lineMaterial;
@@ -147,8 +153,20 @@ namespace Interaction
             SetState(true, "Origin set -- keep this spot and heading for next time.");
         }
 
+        private bool _worldLockHandled;
+
         private void Update()
         {
+            if (_disableMrukWorldLock && !_worldLockHandled && MRUK.Instance != null)
+            {
+                _worldLockHandled = true;
+                if (MRUK.Instance.EnableWorldLock)
+                {
+                    MRUK.Instance.EnableWorldLock = false;
+                    Debug.Log("[Origin] Disabled MRUK world lock -- the manual origin owns alignment.");
+                }
+            }
+
             // OVRManager.display doesn't exist until the manager has initialised.
             if (!_displaySubscribed && OVRManager.display != null)
             {

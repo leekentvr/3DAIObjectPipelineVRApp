@@ -65,6 +65,17 @@ namespace Interaction
         private Vector3 _initialLossyScale;
         private bool _wasGrabbed;
         private Grabbable _grabbable;
+        private Rigidbody _rb;
+
+        // These objects are aligned by hand and must never move on their own. The Rigidbody exists
+        // only because the grab interactable wants one; keep it kinematic with no gravity even if
+        // something (the SDK's throw handling, a slow frame) tries to switch physics on.
+        private void LateUpdate()
+        {
+            if (_rb == null) return;
+            if (!_rb.isKinematic) _rb.isKinematic = true;
+            if (_rb.useGravity) _rb.useGravity = false;
+        }
 
         /// <summary>Call once, right after the mesh is placed at its initial pose.</summary>
         public void Initialize(string label)
@@ -79,10 +90,12 @@ namespace Interaction
             if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
             rb.isKinematic = true;   // manual alignment, no physics/gravity pulling it around
             rb.useGravity = false;
+            _rb = rb;
 
             _grabbable = gameObject.AddComponent<Grabbable>();
             _grabbable.MaxGrabPoints = 2; // 1 grab = move+rotate, 2 grabs = also scale
             _grabbable.InjectOptionalRigidbody(rb);
+            _grabbable.InjectOptionalThrowWhenUnselected(false); // releasing must not fling/drop it
 
             // The Grabbable auto-generates a GrabFreeTransformer whose default scale
             // constraints lock every axis to exactly 1x (ConstrainAxis = true, range
