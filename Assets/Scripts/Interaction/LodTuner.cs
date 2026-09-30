@@ -70,7 +70,7 @@ namespace Interaction
         private void HandleObjectPlaced(GameObject placed)
         {
             _current = placed != null ? placed.GetComponent<PlacedObjectLod>() : null;
-            _currentRatio = MiddleRatio();
+            _currentRatio = _current != null && _current.CurrentRatio > 0f ? _current.CurrentRatio : MiddleRatio();
             SetScope(false);
             Report(_current == null
                 ? "LoD: (no LoD endpoint for this object)"

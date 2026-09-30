@@ -68,6 +68,11 @@ namespace Interaction
                  "degrades Quest framerate over a long session. 0 = unlimited.")]
         [SerializeField] private int _maxPlacedObjects = 12;
 
+        [Tooltip("LoD ratio a new capture is upgraded to right after placement (1 = full detail). " +
+                 "The mesh the reconstruction returns first is only ~3000 faces, which looks blocky and " +
+                 "washed out; this swaps in a finer level automatically. 0 = keep the default mesh.")]
+        [SerializeField, Range(0f, 1f)] private float _initialLodRatio = 0.5f;
+
         [Header("Debugging")]
         [Tooltip("Write every captured frame's exact color/depth PNG bytes -- the same " +
                  "bytes that get uploaded -- to Application.persistentDataPath/debug-captures " +
@@ -351,6 +356,20 @@ namespace Interaction
             placement.Configure(_client, projectId, obj.Index);
 
             PlacedObjectsRoot.Adopt(placed.transform);
+
+            // Upgrade from the coarse default mesh to a real LoD before showing the "done" state, so
+            // the object starts at the same quality as a room load / the LoD buttons' middle level.
+            if (_initialLodRatio > 0f)
+            {
+                var placedLod = placed.GetComponent<PlacedObjectLod>();
+                if (placedLod != null)
+                {
+                    Report("Refining detail ...");
+                    GameObject refined = await placedLod.SetLodAsync(_initialLodRatio);
+                    if (refined != null) placed = refined; // the swap replaces the root
+                }
+            }
+
             TrackAndTrim(placed);
 
             Report($"Done in {FormatElapsed(_processingStopwatch.Elapsed)}.");
