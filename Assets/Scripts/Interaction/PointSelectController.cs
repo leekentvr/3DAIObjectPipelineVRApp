@@ -62,6 +62,12 @@ namespace Interaction
                  "the baked rotation looked wrong.")]
         [SerializeField] private bool _trustBakedRotation = true;
 
+        [Header("Placed objects")]
+        [Tooltip("Max reconstructed objects kept in the scene. When exceeded, the oldest is " +
+                 "destroyed (its saved server placement is unaffected). Unbounded accumulation " +
+                 "degrades Quest framerate over a long session. 0 = unlimited.")]
+        [SerializeField] private int _maxPlacedObjects = 12;
+
         [Header("Debugging")]
         [Tooltip("Write every captured frame's exact color/depth PNG bytes -- the same " +
                  "bytes that get uploaded -- to Application.persistentDataPath/debug-captures " +
@@ -81,6 +87,8 @@ namespace Interaction
 
         private PipelineApiClient _client;
         private bool _busy;
+        private readonly System.Collections.Generic.Queue<GameObject> _placedObjects =
+            new System.Collections.Generic.Queue<GameObject>();
 
         /// <summary>True while a selection is being processed end to end (capture ->
         /// upload -> reconstruction -> placement). While true, new selections are
@@ -327,8 +335,23 @@ namespace Interaction
             if (placement == null) placement = placed.AddComponent<PlacementSync>();
             placement.Configure(_client, projectId, obj.Index);
 
+            TrackAndTrim(placed);
+
             Report($"Done in {FormatElapsed(_processingStopwatch.Elapsed)}.");
             OnObjectPlaced?.Invoke(placed);
+        }
+
+        /// <summary>Remembers a newly placed object and destroys the oldest ones beyond
+        /// _maxPlacedObjects.</summary>
+        private void TrackAndTrim(GameObject placed)
+        {
+            _placedObjects.Enqueue(placed);
+            if (_maxPlacedObjects <= 0) return;
+            while (_placedObjects.Count > _maxPlacedObjects)
+            {
+                GameObject oldest = _placedObjects.Dequeue();
+                if (oldest != null) Destroy(oldest);
+            }
         }
 
         /// <summary>Writes the exact bytes about to be uploaded to
