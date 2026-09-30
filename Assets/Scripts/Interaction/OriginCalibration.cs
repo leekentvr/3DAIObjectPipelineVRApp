@@ -14,6 +14,12 @@ namespace Interaction
     ///
     /// - Setting the origin first recenters the headset (OVRDisplay.RecenterPose), then locks the
     ///   origin to the headset's floor position and flat facing direction.
+    /// - The origin is pinned with an OVRSpatialAnchor. The runtime keeps an anchor locked to the
+    ///   real world when tracking is corrected or the tracking space shifts (a recenter, or the
+    ///   headset re-localizing under heavy load), so the origin -- and every object placed
+    ///   relative to it -- stays put instead of drifting away from the room. Without the anchor
+    ///   (permission missing / creation failed) objects sit at fixed Unity coordinates and DO drift
+    ///   when that happens.
     /// - A marker (ring + forward arrow) shows the origin. Until it is set, the marker follows
     ///   the headset (amber) as a preview of where it WOULD be set; once set it stays put (green).
     /// - The origin is invalidated when the headset is recentered by the user or taken off, and
@@ -47,6 +53,9 @@ namespace Interaction
         public event Action<bool, string> OnStateChanged;
 
         public bool IsCalibrated { get; private set; }
+
+        /// <summary>True when the origin is pinned to the real world by a spatial anchor.</summary>
+        public bool IsAnchored => _anchor != null && _anchor.Created;
         public string StatusMessage { get; private set; } = "Origin not set";
 
         /// <summary>The origin frame: position on the floor, forward = the calibrated heading.
@@ -54,6 +63,7 @@ namespace Interaction
         public Transform Frame => _frame;
 
         private Transform _frame;
+        private OVRSpatialAnchor _anchor;
         private OVRCameraRig _rig;
         private readonly System.Collections.Generic.List<LineRenderer> _lines =
             new System.Collections.Generic.List<LineRenderer>();
@@ -119,6 +129,7 @@ namespace Interaction
         public void Invalidate(string reason)
         {
             if (!IsCalibrated && StatusMessage == reason) return;
+            RemoveAnchor();
             IsCalibrated = false;
             SetMarkerColor(_previewColor);
             SetState(false, reason);
@@ -146,11 +157,47 @@ namespace Interaction
                 yield break;
             }
 
+            // A live anchor owns its transform, so drop the old one before moving the frame.
+            if (_anchor != null)
+            {
+                RemoveAnchor();
+                yield return null;
+            }
+
             _frame.SetPositionAndRotation(pos, rot);
             IsCalibrated = true;
             SetMarkerColor(_lockedColor);
+
+            // Pin the origin to the real world so it survives tracking corrections.
+            _anchor = _frame.gameObject.AddComponent<OVRSpatialAnchor>();
+            float waited = 0f;
+            while (_anchor != null && !_anchor.Created && waited < 4f)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            bool anchored = IsAnchored;
+            if (!anchored)
+            {
+                RemoveAnchor();
+                Debug.LogWarning("[Origin] Spatial anchor could not be created -- objects will not follow " +
+                                 "tracking corrections (check the anchor permission / OVR anchor support).");
+            }
+
             _busy = false;
-            SetState(true, "Origin set -- keep this spot and heading for next time.");
+            SetState(true, anchored
+                ? "Origin set and anchored -- keep this spot and heading for next time."
+                : "Origin set, but NOT anchored: it can drift if tracking shifts.");
+        }
+
+        private void RemoveAnchor()
+        {
+            if (_anchor != null)
+            {
+                Destroy(_anchor);
+                _anchor = null;
+            }
         }
 
         private bool _worldLockHandled;
@@ -185,12 +232,15 @@ namespace Interaction
         private void OnRecentered()
         {
             if (Time.unscaledTime < _ignoreRecenterUntil) return; // our own recenter
-            if (IsCalibrated) Invalidate("Headset was recentered -- set the origin again at your point.");
+            // An anchored origin keeps its place in the real world through a recenter.
+            if (IsCalibrated && !IsAnchored)
+                Invalidate("Headset was recentered -- set the origin again at your point.");
         }
 
         private void OnHeadsetRemoved()
         {
-            if (IsCalibrated) Invalidate("Headset was removed -- set the origin again at your point.");
+            if (IsCalibrated && !IsAnchored)
+                Invalidate("Headset was removed -- set the origin again at your point.");
         }
 
         private void SetState(bool calibrated, string message)
