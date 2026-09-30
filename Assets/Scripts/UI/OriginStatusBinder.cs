@@ -33,7 +33,7 @@ namespace UI
         {
             Debug.Log("[Origin] Set origin pressed.");
             Bind();
-            if (_origin != null) _origin.Calibrate();
+            if (_origin != null) _origin.CalibrateWithCountdown();
             else Debug.LogWarning("[Origin] No OriginCalibration available.");
         }
 
@@ -62,7 +62,11 @@ namespace UI
                 _status.text = calibrated ? message : $"{message}";
                 _status.color = calibrated ? Ok : Warn;
             }
-            if (_buttonLabel != null) _buttonLabel.text = calibrated ? "Recalibrate origin" : "Set origin here";
+            if (_buttonLabel != null)
+            {
+                int s = _origin != null ? Mathf.RoundToInt(_origin.CountdownSeconds) : 5;
+                _buttonLabel.text = (calibrated ? "Recalibrate" : "Set origin") + $"  ({s} s)";
+            }
         }
     }
 }

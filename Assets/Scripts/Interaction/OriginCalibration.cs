@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using Meta.XR.MRUtilityKit;
+using TMPro;
 using UnityEngine;
 
 namespace Interaction
@@ -25,6 +26,12 @@ namespace Interaction
     /// - The origin is invalidated when the headset is recentered by the user or taken off, and
     ///   new captures / room loads are blocked until it is set again (see TryRequire).
     ///
+    /// Because the panel is at eye level and the marker is on the floor, you can't watch both at once.
+    /// So there are two hands-free ways to set the origin, both while looking at the floor marker:
+    ///   - the panel button starts a countdown (default 5 s, with beeps, haptics and big digits on the
+    ///     floor beside the marker) and locks at zero -- press it, then look down and line up;
+    ///   - HOLD the A button (right controller) or X button (left) for one second.
+    ///
     /// Created automatically at startup if the scene has none.
     /// </summary>
     public class OriginCalibration : MonoBehaviour
@@ -34,6 +41,14 @@ namespace Interaction
         [Tooltip("Recenter the headset when setting the origin, so the tracking origin is reset " +
                  "at the calibration point too.")]
         [SerializeField] private bool _recenterHeadset = true;
+
+        [Tooltip("Seconds between pressing the panel button and the origin locking, so you can look " +
+                 "down at the floor marker and line up first.")]
+        [SerializeField] private float _countdownSeconds = 5f;
+
+        [Tooltip("Hold A (right controller) or X (left controller) for this long to set the origin " +
+                 "without using the panel. 0 disables the shortcut.")]
+        [SerializeField] private float _holdToSetSeconds = 1f;
 
         [Tooltip("MRUK's world lock rewrites the tracking space every frame to keep the room scan " +
                  "fixed. That fights the manual origin (and recentering) and can slowly shift " +
@@ -54,9 +69,13 @@ namespace Interaction
 
         public bool IsCalibrated { get; private set; }
 
+        /// <summary>Length of the countdown the panel button uses.</summary>
+        public float CountdownSeconds => _countdownSeconds;
+
         /// <summary>True when the origin is pinned to the real world by a spatial anchor.</summary>
         public bool IsAnchored => _anchor != null && _anchor.Created;
-        public string StatusMessage { get; private set; } = "Origin not set";
+        public string StatusMessage { get; private set; } =
+            "Origin not set. Press the button, then look down at the marker -- or hold A / X for 1 s on your mark.";
 
         /// <summary>The origin frame: position on the floor, forward = the calibrated heading.
         /// Only meaningful while IsCalibrated.</summary>
@@ -68,6 +87,13 @@ namespace Interaction
         private readonly System.Collections.Generic.List<LineRenderer> _lines =
             new System.Collections.Generic.List<LineRenderer>();
         private bool _busy;
+        private bool _counting;
+        private float _holdTimer;
+        private bool _holdFired;
+        private TMP_Text _countText;
+        private AudioSource _audio;
+        private AudioClip _tick;
+        private AudioClip _lockTone;
         private float _ignoreRecenterUntil;
         private bool _displaySubscribed;
         private Camera _cam;
@@ -93,7 +119,14 @@ namespace Interaction
 
             _frame = new GameObject("OriginFrame").transform;
             BuildMarker();
+            BuildCountdownText();
             SetMarkerColor(_previewColor);
+
+            _audio = gameObject.AddComponent<AudioSource>();
+            _audio.playOnAwake = false;
+            _audio.spatialBlend = 0f;
+            _tick = MakeTone(880f, 0.08f);
+            _lockTone = MakeTone(1320f, 0.35f);
         }
 
         private void OnEnable()
@@ -120,17 +153,46 @@ namespace Interaction
         public static bool TryRequire(out string message)
         {
             if (Instance == null || Instance.IsCalibrated) { message = null; return true; }
-            message = "Set the origin first: stand at your origin point, face the marked direction " +
-                      "and press \"Set origin here\".";
+            message = "Set the origin first: stand on your origin point facing the marked direction, then " +
+                      "use the panel's origin countdown or hold A / X for 1 s.";
             return false;
         }
 
-        /// <summary>Button entry point: recenter (optionally) and lock the origin here.</summary>
+        /// <summary>Recenter (optionally) and lock the origin here, right now.</summary>
         public void Calibrate()
         {
-            if (_busy) { Debug.Log("[Origin] Already calibrating."); return; }
+            if (_busy || _counting) { Debug.Log("[Origin] Already calibrating."); return; }
             Debug.Log("[Origin] Calibrating ...");
             StartCoroutine(CalibrateRoutine());
+        }
+
+        /// <summary>Panel button entry point: count down (beeps, haptics, digits on the floor) so you can
+        /// look down and line up on your mark, then lock the origin.</summary>
+        public void CalibrateWithCountdown()
+        {
+            if (_busy || _counting) { Debug.Log("[Origin] Already calibrating."); return; }
+            StartCoroutine(CountdownRoutine());
+        }
+
+        private IEnumerator CountdownRoutine()
+        {
+            _counting = true;
+            // Recalibrating: drop the current origin so the marker returns to following your feet
+            // (amber) and you can see exactly where the new one will land.
+            if (IsCalibrated) Invalidate("Recalibrating ...");
+
+            int seconds = Mathf.Max(1, Mathf.RoundToInt(_countdownSeconds));
+            for (int s = seconds; s >= 1; s--)
+            {
+                SetState(false, $"Look down and line up on your mark -- setting in {s} ...");
+                if (_countText != null) _countText.text = s.ToString();
+                Beep(_tick, 0.25f, 0.06f);
+                yield return new WaitForSeconds(1f);
+            }
+            if (_countText != null) _countText.text = "";
+            _counting = false;
+            Beep(_lockTone, 1f, 0.2f);
+            Calibrate();
         }
 
         /// <summary>Forget the current origin (objects stay where they are until it's set again).</summary>
@@ -146,6 +208,7 @@ namespace Interaction
         private IEnumerator CalibrateRoutine()
         {
             _busy = true;
+            if (_countText != null) _countText.text = "";
             SetState(IsCalibrated, "Setting origin ...");
 
             if (_recenterHeadset && OVRManager.display != null)
@@ -222,12 +285,63 @@ namespace Interaction
                 }
             }
 
+            PollHoldToSet();
+
             // OVRManager.display doesn't exist until the manager has initialised.
             if (!_displaySubscribed && OVRManager.display != null)
             {
                 OVRManager.display.RecenteredPose += OnRecentered;
                 _displaySubscribed = true;
             }
+        }
+
+        // Hold A (right) / X (left) for _holdToSetSeconds: set the origin without looking at the panel.
+        private void PollHoldToSet()
+        {
+            if (_holdToSetSeconds <= 0f || _busy || _counting) { _holdTimer = 0f; return; }
+            bool held = OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.RTouch)
+                     || OVRInput.Get(OVRInput.Button.One, OVRInput.Controller.LTouch);
+            if (!held) { _holdTimer = 0f; _holdFired = false; return; }
+            if (_holdFired) return;
+
+            _holdTimer += Time.unscaledDeltaTime;
+            if (_holdTimer >= _holdToSetSeconds)
+            {
+                _holdFired = true;
+                Beep(_lockTone, 1f, 0.2f);
+                if (IsCalibrated) Invalidate("Recalibrating ...");
+                Calibrate();
+            }
+        }
+
+        private void Beep(AudioClip clip, float haptic, float hapticSeconds)
+        {
+            if (_audio != null && clip != null) _audio.PlayOneShot(clip);
+            OVRInput.SetControllerVibration(1f, haptic, OVRInput.Controller.RTouch);
+            OVRInput.SetControllerVibration(1f, haptic, OVRInput.Controller.LTouch);
+            CancelInvoke(nameof(StopHaptics));
+            Invoke(nameof(StopHaptics), hapticSeconds);
+        }
+
+        private void StopHaptics()
+        {
+            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
+            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
+        }
+
+        private static AudioClip MakeTone(float hz, float seconds)
+        {
+            const int rate = 44100;
+            int n = Mathf.RoundToInt(rate * seconds);
+            var data = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                float env = Mathf.Min(1f, Mathf.Min(i, n - i) / (rate * 0.01f)); // short fade in/out: no click
+                data[i] = Mathf.Sin(2f * Mathf.PI * hz * i / rate) * 0.35f * env;
+            }
+            var clip = AudioClip.Create($"tone{hz}", n, 1, rate, false);
+            clip.SetData(data, 0);
+            return clip;
         }
 
         private void LateUpdate()
@@ -306,6 +420,24 @@ namespace Interaction
             AddLine("Tail", new[] { new Vector3(-0.07f, 0.005f, 0f), new Vector3(0.07f, 0.005f, 0f) }, loop: false);
             // Vertical pole so the origin is visible from further away / above clutter.
             AddLine("Pole", new[] { new Vector3(0f, 0f, 0f), new Vector3(0f, 0.35f, 0f) }, loop: false);
+        }
+
+        // Big digits lying on the floor beside the arrow, readable when looking down during the countdown.
+        private void BuildCountdownText()
+        {
+            var go = new GameObject("Countdown");
+            go.transform.SetParent(_frame, false);
+            go.transform.localPosition = new Vector3(0.22f, 0.012f, 0.42f);
+            go.transform.localRotation = Quaternion.Euler(90f, 0f, 0f); // lie flat, facing up
+            var t = go.AddComponent<TextMeshPro>();
+            t.text = "";
+            t.alignment = TextAlignmentOptions.Center;
+            t.color = _previewColor;
+            t.enableAutoSizing = true;          // fit the 0.4 m box regardless of TMP's world scaling
+            t.fontSizeMin = 0.1f;
+            t.fontSizeMax = 100f;
+            t.rectTransform.sizeDelta = new Vector2(0.4f, 0.4f);
+            _countText = t;
         }
 
         private void AddLine(string name, Vector3[] points, bool loop)
