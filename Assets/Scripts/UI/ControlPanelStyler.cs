@@ -31,6 +31,9 @@ namespace UI
         private static readonly Color Divider = new Color(1f, 1f, 1f, 0.09f);
 
         private const float W = 480f;
+        // Height including the ORIGIN section at the top of the body.
+        private const float PanelHeight = 740f;
+        private const float OriginSectionHeight = 140f;
         private const float Pad = 24f;
         private const float Inner = W - 2f * Pad;
 
@@ -190,6 +193,21 @@ namespace UI
                 if (!keep.Contains(child)) toMove.Add(child);
             foreach (Transform child in toMove) child.SetParent(body, false);
 
+            // ---- ORIGIN section, first thing in the body: shift the existing content down to make room.
+            foreach (Transform child in body)
+            {
+                var rt = (RectTransform)child;
+                rt.anchoredPosition += new Vector2(0f, -OriginSectionHeight);
+            }
+            Label(body, "SecOrigin", "ORIGIN", 16, FontStyles.Bold, TextMuted, Pad, 84, Inner, 22);
+            Button originBtn = MakeButton(body, "btnSetOrigin", "Set origin here", Accent, Pad, 112, Inner, 48, 22);
+            TMP_Text originStatus = Label(body, "OriginStatus", "Origin not set", 15, FontStyles.Normal, TextMuted,
+                                          Pad, 166, Inner, 40);
+            Rule(body, "RuleOrigin", 212);
+            var originBinder = root.gameObject.AddComponent<OriginStatusBinder>();
+            originBinder.Configure(originStatus, originBtn, originBtn.GetComponentInChildren<TMP_Text>());
+            AddClick(originBtn, originBinder.SetOriginPressed);
+
             body.SetSiblingIndex(2);
             if (overlay != null) overlay.SetAsLastSibling();
 
@@ -200,6 +218,7 @@ namespace UI
                 if (overlayGroup == null) overlayGroup = overlay.gameObject.AddComponent<CanvasGroup>();
             }
 
+            root.sizeDelta = new Vector2(W, PanelHeight);
             var window = root.gameObject.GetComponent<ControlPanelWindow>();
             if (window == null) window = root.gameObject.AddComponent<ControlPanelWindow>();
             window.Configure(root, bodyGo, overlayGroup, minimiseBtn.GetComponentInChildren<TMP_Text>(),

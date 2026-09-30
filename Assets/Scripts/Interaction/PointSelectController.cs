@@ -135,6 +135,14 @@ namespace Interaction
         /// hand ray, etc.) at the moment the user selects an object.</summary>
         public async void OnPointerSelect(Ray pointerRay)
         {
+            // Objects are stored relative to the calibrated origin; capturing before it is set
+            // would make them impossible to line up again later.
+            if (!OriginCalibration.TryRequire(out string originMessage))
+            {
+                Report(originMessage);
+                return;
+            }
+
             if (_busy)
             {
                 Report("Pending -- still processing the previous selection. Input locked until it finishes.");

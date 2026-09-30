@@ -27,10 +27,10 @@ namespace Interaction
     /// Wiring: put this on any GameObject, set _room, assign _meshInstantiator, and bind a VR
     /// button's OnClick to LoadRoom().
     ///
-    /// Placements are saved relative to the MRUK room (see RoomFrame), so they realign after a
-    /// Guardian/space reset provided the same room is loaded. Older placements saved in raw
-    /// tracking space still load, but only line up if the origin hasn't moved.
-    /// MRUK must have loaded the scene before LoadRoom() is called.
+    /// Placements are saved relative to the calibrated origin (see OriginCalibration / RoomFrame),
+    /// so they line up again whenever the origin is set at the same physical point and heading.
+    /// The origin must be set before LoadRoom() does anything. Older placements saved in raw
+    /// tracking space or relative to an MRUK room still load, but at their raw pose.
     /// </summary>
     public class RoomLoader : MonoBehaviour
     {
@@ -93,6 +93,11 @@ namespace Interaction
                 Report("Already loading -- please wait.");
                 return 0;
             }
+            if (!OriginCalibration.TryRequire(out string originMessage))
+            {
+                Report(originMessage);
+                return 0;
+            }
             if (string.IsNullOrWhiteSpace(room))
             {
                 Report("No room name set.");
@@ -151,17 +156,6 @@ namespace Interaction
                 objects = tail;
             }
 
-            // Placements saved relative to the MRUK room can only be restored once the headset has
-            // loaded that room scan; give it a few seconds instead of dropping objects at raw poses.
-            if (AnyRoomRelative(objects) && !RoomFrame.TryGetCurrent(out _, out _))
-            {
-                Report("Waiting for the room scan ...");
-                for (float t = 0f; t < 12f && !RoomFrame.TryGetCurrent(out _, out _); t += 0.25f)
-                    await Task.Delay(250);
-                if (!RoomFrame.TryGetCurrent(out _, out _))
-                    Report("Room scan not found -- placing at raw positions (may be misaligned).");
-            }
-
             float ratio = StartLodRatio;
             Debug.Log($"[Room] Loading {objects.Length} of {resp.Objects.Length} object(s) from " +
                       $"{resp.ProjectCount} capture(s) in '{room}' at LoD {ratio:0.###} ...");
@@ -217,13 +211,6 @@ namespace Interaction
             return placed;
         }
 
-        private static bool AnyRoomRelative(ObjectEntry[] objects)
-        {
-            foreach (ObjectEntry o in objects)
-                if (o.Placement != null && o.Placement.Frame == RoomFrame.FrameId) return true;
-            return false;
-        }
-
         /// <summary>Destroys every object a room load created (including LoD-swapped ones).</summary>
         public void ClearLoaded()
         {
@@ -259,8 +246,7 @@ namespace Interaction
                     if (RoomFrame.TryGetCurrent(out Transform frame, out string uuid) && uuid == p.RoomUuid)
                         RoomFrame.ToWorld(frame, pos, rot, out pos, out rot);
                     else
-                        Debug.LogWarning($"[Room] {obj.Project}#{obj.Index} was saved in MRUK room " +
-                                         $"{p.RoomUuid}, which isn't the current room -- placed at its raw pose.");
+                        Debug.LogWarning($"[Room] {obj.Project}#{obj.Index}: origin not available -- placed at its raw pose.");
                 }
                 return;
             }
