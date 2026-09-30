@@ -30,7 +30,7 @@ namespace Interaction
         [SerializeField] private RoomLoader _roomLoader;
 
         [Tooltip("LoD ratios to step through (fraction of the full-res face count). 1 = full detail.")]
-        [SerializeField] private float[] _ratioLadder = { 0.02f, 0.05f, 0.1f, 0.25f, 0.5f, 0.75f, 1f };
+        [SerializeField] private float[] _ratioLadder = { 0.05f, 0.2f, 0.5f, 0.75f, 1f };
 
         [Tooltip("Optional TMP text that shows the current LoD status, e.g. \"LoD 0.25 (4/7)\".")]
         [SerializeField] private TMP_Text _statusLabel;
@@ -70,7 +70,7 @@ namespace Interaction
         private void HandleObjectPlaced(GameObject placed)
         {
             _current = placed != null ? placed.GetComponent<PlacedObjectLod>() : null;
-            _currentRatio = 0f;
+            _currentRatio = MiddleRatio();
             SetScope(false);
             Report(_current == null
                 ? "LoD: (no LoD endpoint for this object)"
@@ -183,9 +183,16 @@ namespace Interaction
         {
             var copy = (_ratioLadder != null && _ratioLadder.Length > 0)
                 ? (float[])_ratioLadder.Clone()
-                : new[] { 0.02f, 0.05f, 0.1f, 0.25f, 0.5f, 0.75f, 1f };
+                : new[] { 0.05f, 0.2f, 0.5f, 0.75f, 1f };
             Array.Sort(copy);
             return copy;
+        }
+
+        /// <summary>The middle rung of the ladder -- where a fresh object starts.</summary>
+        private float MiddleRatio()
+        {
+            float[] ladder = SortedLadder();
+            return ladder[ladder.Length / 2];
         }
 
         private void Report(string msg)

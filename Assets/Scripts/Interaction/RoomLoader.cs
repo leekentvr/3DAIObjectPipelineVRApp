@@ -17,8 +17,8 @@ namespace Interaction
     /// a fallback grid so they're at least visible.
     ///
     /// Safety for the headset (loading many test captures at once has crashed it):
-    ///  - everything loads at the LOWEST level of detail first (_startLodRatio); raise it
-    ///    afterwards with the LoD buttons (LodTuner),
+    ///  - everything loads at a moderate level of detail first (_startLodRatio, default 0.5);
+    ///    step it up or down afterwards with the LoD buttons (LodTuner),
     ///  - at most _maxObjects are loaded (the newest ones),
     ///  - only one load runs at a time (a second press is ignored),
     ///  - objects are created one at a time with a frame yielded between them, and destroyed
@@ -44,9 +44,10 @@ namespace Interaction
                  "_startLodRatio.")]
         [SerializeField, Range(0f, 1f)] private float _lodRatio = 0f;
 
-        [Tooltip("LoD ratio (fraction of the full-res face count) everything is loaded at first. " +
-                 "Keep this very low; raise it afterwards with the LoD buttons.")]
-        [SerializeField, Range(0.001f, 1f)] private float _startLodRatio = 0.02f;
+        [Tooltip("LoD ratio (fraction of the full-res face count, 1 = full detail) everything is " +
+                 "loaded at first. Defaults to the middle of the LoD ladder; step it up or down " +
+                 "afterwards with the LoD buttons.")]
+        [SerializeField, Range(0.001f, 1f)] private float _startLodRatio = 0.5f;
 
         [Tooltip("Maximum objects to load (the newest ones win). 0 = unlimited. Protects the " +
                  "headset from a room with a lot of old test captures.")]
