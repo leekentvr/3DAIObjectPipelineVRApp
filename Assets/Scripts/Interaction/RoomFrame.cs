@@ -14,6 +14,22 @@ namespace Interaction
     {
         public const string FrameId = "mruk_room";
 
+        /// <summary>
+        /// The scene has no MRUK component, and without one there is no room scan, no world locking
+        /// and no room-relative placement (everything silently falls back to raw tracking space --
+        /// objects then drift when the headset recenters or changes hands). Create a default one
+        /// (loads the room scan from the device at startup) if the scene doesn't have its own. To
+        /// configure it, add an MRUK component to a GameObject in the scene instead.
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void EnsureMruk()
+        {
+            if (MRUK.Instance != null || Object.FindAnyObjectByType<MRUK>() != null) return;
+            new GameObject("MRUK (auto-created)").AddComponent<MRUK>();
+            Debug.Log("[RoomFrame] No MRUK in the scene -- created one so room-relative placement and " +
+                      "world locking work. Add an MRUK component to the scene to configure it.");
+        }
+
         /// <summary>The room the headset is currently in, if MRUK has loaded one.</summary>
         public static bool TryGetCurrent(out Transform frame, out string uuid)
         {
