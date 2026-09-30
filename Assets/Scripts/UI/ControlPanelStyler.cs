@@ -85,8 +85,10 @@ namespace UI
             card.transform.SetSiblingIndex(1);
             card.raycastTarget = false;
 
-            // ---- header
-            Label(root, "Title", "Reconstruction Control", 30, FontStyles.Bold, TextPrimary, Pad, 18, Inner, 44);
+            // ---- header (title bar: stays visible when minimised)
+            Label(root, "Title", "Pipeline Control", 28, FontStyles.Bold, TextPrimary, Pad, 18, 250, 44);
+            Button recenterBtn = MakeButton(root, "btnRecenter", "Recenter", Secondary, W - Pad - 44f - 8f - 104f, 20, 104, 40, 18);
+            Button minimiseBtn = MakeButton(root, "btnMinimise", "–", Secondary, W - Pad - 44f, 20, 44, 40, 28);
             Rule(root, "Rule0", 70);
 
             // ---- server section
@@ -150,6 +152,42 @@ namespace UI
 
             WireRoom(roomField, roomStatus, btnLoad);
             WireScope(scopeBtn);
+
+            // ---- window behaviour: everything except the background, title bar and overlay goes in a
+            // Body container that minimising hides.
+            var bodyGo = new GameObject("Body", typeof(RectTransform));
+            var body = (RectTransform)bodyGo.transform;
+            body.SetParent(root, false);
+            Stretch(body, 0f);
+            var keep = new System.Collections.Generic.HashSet<Transform>
+            {
+                border.transform, card.transform, body,
+                root.Find("Title"), root.Find("Rule0"),
+                root.Find("Surface"), // Interaction SDK surface: must stay active or pointer input dies
+                recenterBtn.transform, minimiseBtn.transform, overlay,
+            };
+            var toMove = new System.Collections.Generic.List<Transform>();
+            foreach (Transform child in root)
+                if (!keep.Contains(child)) toMove.Add(child);
+            foreach (Transform child in toMove) child.SetParent(body, false);
+
+            // Title bar and its divider are part of the always-visible header.
+            body.SetSiblingIndex(2);
+            if (overlay != null) overlay.SetAsLastSibling();
+
+            CanvasGroup overlayGroup = null;
+            if (overlay != null)
+            {
+                overlayGroup = overlay.GetComponent<CanvasGroup>();
+                if (overlayGroup == null) overlayGroup = overlay.gameObject.AddComponent<CanvasGroup>();
+            }
+
+            var window = root.gameObject.GetComponent<ControlPanelWindow>();
+            if (window == null) window = root.gameObject.AddComponent<ControlPanelWindow>();
+            window.Init(root, bodyGo, overlayGroup, minimiseBtn.GetComponentInChildren<TMP_Text>(),
+                        W, root.sizeDelta.y, 78f);
+            minimiseBtn.onClick.AddListener(window.ToggleMinimised);
+            recenterBtn.onClick.AddListener(window.Recenter);
         }
 
         // ------------------------------------------------------------------ wiring
