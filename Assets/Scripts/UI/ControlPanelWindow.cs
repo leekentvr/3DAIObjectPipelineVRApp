@@ -10,23 +10,25 @@ namespace UI
     ///
     /// Minimising hides the body, shrinks the canvas to the title-bar height (keeping the top
     /// edge where it was), and shrinks the Interaction SDK's bounds clipper to match so clicks
-    /// only register on what's visible. Set up by ControlPanelStyler; nothing to wire by hand.
+    /// only register on what's visible. Set up by ControlPanelStyler; bind the title-bar buttons
+    /// to ToggleMinimised() and Recenter().
     /// </summary>
     public class ControlPanelWindow : MonoBehaviour
     {
-        private RectTransform _root;
-        private GameObject _body;
-        private CanvasGroup _overlayGroup;
-        private TMP_Text _minimiseLabel;
-        private float _expandedHeight;
-        private float _minimisedHeight;
-        private float _width;
+        [SerializeField] private RectTransform _root;
+        [SerializeField] private GameObject _body;
+        [SerializeField] private CanvasGroup _overlayGroup;
+        [SerializeField] private TMP_Text _minimiseLabel;
+        [SerializeField] private float _width = 480f;
+        [SerializeField] private float _expandedHeight = 600f;
+        [SerializeField] private float _minimisedHeight = 78f;
+
         private bool _minimised;
 
         public bool IsMinimised => _minimised;
 
-        public void Init(RectTransform root, GameObject body, CanvasGroup overlayGroup, TMP_Text minimiseLabel,
-                         float width, float expandedHeight, float minimisedHeight)
+        public void Configure(RectTransform root, GameObject body, CanvasGroup overlayGroup, TMP_Text minimiseLabel,
+                              float width, float expandedHeight, float minimisedHeight)
         {
             _root = root;
             _body = body;
@@ -35,8 +37,10 @@ namespace UI
             _width = width;
             _expandedHeight = expandedHeight;
             _minimisedHeight = minimisedHeight;
-            Apply(false);
         }
+
+        // Always start expanded so a stray state can never leave the user with no usable panel.
+        private void Start() => Apply(false);
 
         /// <summary>Wire to the minimise / restore button.</summary>
         public void ToggleMinimised() => Apply(!_minimised);
@@ -45,6 +49,7 @@ namespace UI
 
         private void Apply(bool minimised)
         {
+            if (_root == null) return;
             bool changed = minimised != _minimised;
             float oldHeight = _root.sizeDelta.y;
             float newHeight = minimised ? _minimisedHeight : _expandedHeight;
@@ -76,7 +81,7 @@ namespace UI
         public void Recenter()
         {
             Camera cam = Camera.main;
-            if (cam == null) return;
+            if (cam == null || _root == null) return;
 
             Vector3 forward = cam.transform.forward;
             forward.y = 0f;

@@ -20,8 +20,6 @@ namespace UI
     /// </summary>
     public static class ControlPanelStyler
     {
-        private const string RoomPrefsKey = "pipeline.room";
-
         // Palette
         private static readonly Color Border = new Color(0.20f, 0.26f, 0.37f, 1f);
         private static readonly Color Card = new Color(0.07f, 0.085f, 0.12f, 0.98f);
@@ -51,7 +49,7 @@ namespace UI
 
             try
             {
-                Build(root);
+                Build(root, null);
             }
             catch (System.Exception e)
             {
@@ -60,7 +58,10 @@ namespace UI
             }
         }
 
-        private static void Build(RectTransform root)
+        /// <summary>Restyles/lays out the panel under <paramref name="root"/> (the world-space canvas).
+        /// Called at runtime by Install, and in the editor by ControlPanelBaker (which passes a saved
+        /// rounded-corner sprite so the result can be stored in the scene).</summary>
+        public static void Build(RectTransform root, Sprite rounded)
         {
             var btnSave = Find<Button>(root, "btnSave");
             var btnTest = Find<Button>(root, "btnTest");
@@ -73,7 +74,7 @@ namespace UI
             var overlay = root.Find("ProcessingOverlay") as RectTransform;
 
             s_font = (txtStatus != null ? txtStatus.font : null) ?? TMP_Settings.defaultFontAsset;
-            s_rounded ??= MakeRoundedSprite();
+            s_rounded = rounded != null ? rounded : MakeRoundedSprite();
 
             // ---- background: 2-unit border, then the card
             var border = MakeImage(root, "ControlPanelBorder", Border, sliced: true);
@@ -150,8 +151,17 @@ namespace UI
                 overlay.SetAsLastSibling();
             }
 
-            WireRoom(roomField, roomStatus, btnLoad);
-            WireScope(scopeBtn);
+            // ---- room text box + LoD scope toggle: real components so the scene keeps the wiring
+            if (roomField != null)
+            {
+                var binder = root.gameObject.AddComponent<RoomInputBinder>();
+                binder.Configure(roomField, roomStatus, btnLoad,
+                                 Object.FindAnyObjectByType<RoomLoader>(),
+                                 Object.FindAnyObjectByType<PointSelectController>());
+            }
+            var scopeComp = root.gameObject.AddComponent<LodScopeButton>();
+            scopeComp.Configure(Object.FindAnyObjectByType<LodTuner>(), scopeBtn.GetComponentInChildren<TMP_Text>(), scopeBtn);
+            AddClick(scopeBtn, scopeComp.Toggle);
 
             // ---- window behaviour: everything except the background, title bar and overlay goes in a
             // Body container that minimising hides.
@@ -171,7 +181,6 @@ namespace UI
                 if (!keep.Contains(child)) toMove.Add(child);
             foreach (Transform child in toMove) child.SetParent(body, false);
 
-            // Title bar and its divider are part of the always-visible header.
             body.SetSiblingIndex(2);
             if (overlay != null) overlay.SetAsLastSibling();
 
@@ -184,99 +193,24 @@ namespace UI
 
             var window = root.gameObject.GetComponent<ControlPanelWindow>();
             if (window == null) window = root.gameObject.AddComponent<ControlPanelWindow>();
-            window.Init(root, bodyGo, overlayGroup, minimiseBtn.GetComponentInChildren<TMP_Text>(),
-                        W, root.sizeDelta.y, 78f);
-            minimiseBtn.onClick.AddListener(window.ToggleMinimised);
-            recenterBtn.onClick.AddListener(window.Recenter);
+            window.Configure(root, bodyGo, overlayGroup, minimiseBtn.GetComponentInChildren<TMP_Text>(),
+                             W, root.sizeDelta.y, 78f);
+            AddClick(minimiseBtn, window.ToggleMinimised);
+            AddClick(recenterBtn, window.Recenter);
         }
 
-        // ------------------------------------------------------------------ wiring
-
-        private static void WireRoom(TMP_InputField field, TMP_Text status, Button loadButton)
+        /// <summary>Button click hookup. In the editor (outside Play mode) it adds a PERSISTENT listener so
+        /// the wiring is saved in the scene; otherwise a normal runtime listener.</summary>
+        private static void AddClick(Button b, UnityEngine.Events.UnityAction action)
         {
-            var loader = Object.FindAnyObjectByType<RoomLoader>();
-            var controller = Object.FindAnyObjectByType<PointSelectController>();
-            if (field == null || loader == null) return;
-
-            string saved = PlayerPrefs.GetString(RoomPrefsKey, "");
-            string initial = Sanitize(saved);
-            if (string.IsNullOrEmpty(initial)) initial = loader.Room;
-            ApplyRoom(initial);
-            field.SetTextWithoutNotify(initial);
-
-            void OnEdited(string text)
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
             {
-                string clean = Sanitize(text);
-                if (string.IsNullOrEmpty(clean)) return; // keep the previous valid room
-                if (clean != text) field.SetTextWithoutNotify(clean);
-                ApplyRoom(clean);
-                PlayerPrefs.SetString(RoomPrefsKey, clean);
-                PlayerPrefs.Save();
-                if (status != null) status.text = $"Room set to '{clean}'.";
+                UnityEditor.Events.UnityEventTools.AddPersistentListener(b.onClick, action);
+                return;
             }
-
-            void ApplyRoom(string room)
-            {
-                loader.Room = room;
-                // Captures are stored as <base>_<timestamp>; keep new captures in the same room.
-                if (controller != null) controller.ProjectName = room;
-            }
-
-            field.onEndEdit.AddListener(OnEdited);
-            field.onDeselect.AddListener(OnEdited);
-            field.onValueChanged.AddListener(text =>
-            {
-                string clean = Sanitize(text);
-                if (!string.IsNullOrEmpty(clean)) ApplyRoom(clean);
-            });
-
-            if (status != null) loader.OnStatusChanged += msg => status.text = msg;
-
-            // Lock the Load button while a load is running (a second press was ignored anyway).
-            if (loadButton != null)
-            {
-                var poll = loadButton.gameObject.AddComponent<LoadButtonLock>();
-                poll.Init(loader, loadButton);
-            }
-        }
-
-        private static void WireScope(Button scopeBtn)
-        {
-            var tuner = Object.FindAnyObjectByType<LodTuner>();
-            if (scopeBtn == null) return;
-            if (tuner == null) { scopeBtn.interactable = false; return; }
-
-            var label = scopeBtn.GetComponentInChildren<TMP_Text>();
-            void Refresh(bool all)
-            {
-                if (label != null) label.text = all ? "Applies to: all" : "Applies to: last placed";
-            }
-            Refresh(tuner.ApplyToAll);
-            tuner.OnScopeChanged += Refresh;
-            scopeBtn.onClick.AddListener(tuner.ToggleScope);
-        }
-
-        /// <summary>Server-side project names allow only letters, digits, '-' and '_'.</summary>
-        private static string Sanitize(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return "";
-            var sb = new System.Text.StringBuilder(s.Length);
-            foreach (char c in s.Trim())
-                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')
-                    sb.Append(c);
-            return sb.Length > 80 ? sb.ToString(0, 80) : sb.ToString();
-        }
-
-        private sealed class LoadButtonLock : MonoBehaviour
-        {
-            private RoomLoader _loader;
-            private Button _button;
-            public void Init(RoomLoader loader, Button button) { _loader = loader; _button = button; }
-            private void Update()
-            {
-                if (_loader != null && _button != null && _button.interactable == _loader.IsLoading)
-                    _button.interactable = !_loader.IsLoading;
-            }
+#endif
+            b.onClick.AddListener(action);
         }
 
         // ------------------------------------------------------------------ styling helpers
@@ -436,16 +370,18 @@ namespace UI
             f.pointSize = 24;
         }
 
-        /// <summary>Procedural anti-aliased rounded rectangle, 9-sliced by Image (radius ~ 14 canvas units).</summary>
-        private static Sprite MakeRoundedSprite()
+        public const int RoundedSize = 64;
+        public const float RoundedRadius = 16f;
+
+        /// <summary>Procedural anti-aliased rounded rectangle, 9-sliced by Image (radius ~ 16 canvas units).</summary>
+        public static Texture2D MakeRoundedTexture()
         {
-            const int size = 64;
-            const float radius = 16f;
+            const int size = RoundedSize;
+            const float radius = RoundedRadius;
             var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
             {
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear,
-                hideFlags = HideFlags.HideAndDontSave,
             };
             var px = new Color32[size * size];
             for (int y = 0; y < size; y++)
@@ -459,9 +395,18 @@ namespace UI
                 px[y * size + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
             }
             tex.SetPixels32(px);
-            tex.Apply(false, true);
-            var sprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f, 0,
-                                       SpriteMeshType.FullRect, new Vector4(radius, radius, radius, radius));
+            tex.Apply(false, false);
+            return tex;
+        }
+
+        // Runtime fallback when no saved sprite asset is supplied.
+        private static Sprite MakeRoundedSprite()
+        {
+            Texture2D tex = MakeRoundedTexture();
+            tex.hideFlags = HideFlags.HideAndDontSave;
+            float r = RoundedRadius;
+            var sprite = Sprite.Create(tex, new Rect(0, 0, RoundedSize, RoundedSize), new Vector2(0.5f, 0.5f), 100f, 0,
+                                       SpriteMeshType.FullRect, new Vector4(r, r, r, r));
             sprite.hideFlags = HideFlags.HideAndDontSave;
             return sprite;
         }
