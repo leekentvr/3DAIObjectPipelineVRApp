@@ -84,6 +84,11 @@ namespace UI
         private void Awake()
         {
             _client = new PipelineApiClient();
+
+            // TMP's own Quest keyboard handling puts typed text at the start of the field and
+            // the overlay pauses the app; VrTextInput drives the system keyboard directly.
+            if (_hostInput != null && _hostInput.GetComponent<VrTextInput>() == null)
+                _hostInput.gameObject.AddComponent<VrTextInput>();
         }
 
         private void OnEnable()
